@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const analysisCanvas = document.getElementById('analysisCanvas');
     const ctx = analysisCanvas.getContext('2d');
     const currentFrameNumSpan = document.getElementById('currentFrameNum');
+    const videoFrameImg = document.getElementById('videoFrame'); // 新增一個用於顯示圖片的 <img> 元素
 
     //運動力學特徵
     const stride_angle = document.getElementById('stride_angle');
@@ -86,65 +87,90 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             websocket.onmessage = (event) => {
-                const data = JSON.parse(event.data);
+                if (event.data instanceof Blob) {
+                    // 如果是圖片數據 (當後端使用 send_bytes 傳送時)
+                    const imageUrl = URL.createObjectURL(event.data);
+                    const img = new Image();
+                    img.onload = () => {
+                        // 確保 canvas 尺寸設定正確
+                        // 這裡為了簡單起見，假設你的 canvas 已經有固定的寬高
+                        // 如果需要根據圖片調整 canvas 尺寸，這裡需要更多邏輯
+                        analysisCanvas.width = img.width; // 或固定為你希望的寬度
+                        analysisCanvas.height = img.height; // 或固定為你希望的高度
 
-                if (data.error) {
-                    errorMessageDiv.textContent = `分析錯誤: ${data.error}`;
-                    errorMessageDiv.classList.remove('hidden');
-                    messageDiv.textContent = '';
-                    websocket.close(); // 關閉連線
-                    return;
-                }
+                        ctx.clearRect(0, 0, analysisCanvas.width, analysisCanvas.height);
+                        ctx.drawImage(img, 0, 0, analysisCanvas.width, analysisCanvas.height);
+                        URL.revokeObjectURL(imageUrl); // 清理 object URL
+                    };
+                    img.src = imageUrl;
 
-                // 繪製影片幀和骨架
-                const img = new Image();
-                img.src = 'data:image/jpeg;base64,' + btoa(data.frame_data);
-                img.onload = () => {
-                    // 根據 canvas 尺寸調整圖片大小
-                    const aspectRatio = img.width / img.height;
-                    let drawWidth = analysisCanvas.width;
-                    let drawHeight = analysisCanvas.height;
-
-                    if (img.width > analysisCanvas.width || img.height > analysisCanvas.height) {
-                        if (img.width / img.height > analysisCanvas.width / analysisCanvas.height) {
-                            drawHeight = analysisCanvas.width / aspectRatio;
-                        } else {
-                            drawWidth = analysisCanvas.height * aspectRatio;
-                        }
+                } else if (typeof event.data === 'string') {
+                    // 如果是文字數據 (JSON 字串)
+                    let data;
+                    try {
+                        data = JSON.parse(event.data);
+                    } catch (e) {
+                        console.error("無法解析 JSON 數據:", e);
+                        errorMessageDiv.textContent = `分析錯誤: 無法解析數據 - ${e.message}`;
+                        errorMessageDiv.classList.remove('hidden');
+                        messageDiv.textContent = '';
+                        websocket.close();
+                        return;
                     }
 
-                    ctx.clearRect(0, 0, analysisCanvas.width, analysisCanvas.height);
-                    ctx.drawImage(img, (analysisCanvas.width - drawWidth) / 2, (analysisCanvas.height - drawHeight) / 2, drawWidth, drawHeight);
+                    if (data.error) {
+                        errorMessageDiv.textContent = `分析錯誤: ${data.error}`;
+                        errorMessageDiv.classList.remove('hidden');
+                        messageDiv.textContent = '';
+                        websocket.close(); // 關閉連線
+                        return;
+                    }
 
-                };
+                    // 如果後端將圖片數據 Base64 編碼在 JSON 內，則在這裡處理
+                    if (data.frame_data) {
+                        videoFrameImg.src = 'data:image/jpeg;base64,' + data.frame_data;
+                        videoFrameImg.onload = () => {
+                             // 確保 canvas 尺寸設定正確
+                            analysisCanvas.width = videoFrameImg.width; // 或固定為你希望的寬度
+                            analysisCanvas.height = videoFrameImg.height; // 或固定為你希望的高度
 
-                // 更新運動力學數據 (關鍵指標分析區塊)
-                currentFrameNumSpan.textContent = data.frame_num;
-                stride_angle.textContent = data.metrics.stride_angle !== undefined ? data.metrics.stride_angle : '---';
-                throwing_angle.textContent = data.metrics.throwing_angle !== undefined ? data.metrics.throwing_angle : '---';
-                arm_symmetry.textContent = data.metrics.arm_symmetry !== undefined ? data.metrics.arm_symmetry : '---';
-                hip_rotation.textContent = data.metrics.hip_rotation !== undefined ? data.metrics.hip_rotation : '---';
-                elbow_height.textContent = data.metrics.elbow_height !== undefined ? data.metrics.elbow_height : '---';
-                ankle_height.textContent = data.metrics.ankle_height !== undefined ? data.metrics.ankle_height : '---';
-                shoulder_rotation.textContent = data.metrics.shoulder_rotation !== undefined ? data.metrics.shoulder_rotation : '---';
-                torso_tilt_angle.textContent = data.metrics.torso_tilt_angle !== undefined ? data.metrics.torso_tilt_angle : '---';
-                release_distance.textContent = data.metrics.release_distance !== undefined ? data.metrics.release_distance : '---';
-                shoulder_to_hip.textContent = data.metrics.shoulder_to_hip !== undefined ? data.metrics.shoulder_to_hip : '---';
+                            ctx.clearRect(0, 0, analysisCanvas.width, analysisCanvas.height);
+                            ctx.drawImage(videoFrameImg, 0, 0, analysisCanvas.width, analysisCanvas.height);
+                        };
+                    }
 
-                // 根據數據生成和顯示建議 (姿勢改善建議區塊)
-                // 這是一個非常簡化的範例，實際應基於更複雜的邏輯
-                if (data.metrics.stride_angle !== undefined && data.metrics.stride_angle < 15) {
-                    suggestionsContentDiv.innerHTML = '<p style="color: orange;">建議：步幅角度小於15度。</p>';
-                } else if (data.metrics.throwing_angle !== undefined && data.metrics.throwing_angle > 120) {
-                    suggestionsContentDiv.innerHTML = '<p style="color: orange;">建議：投擲角度大於120度。</p>';
-                } else if (data.metrics.arm_symmetry !== undefined && data.metrics.arm_symmetry < 1) {
-                    suggestionsContentDiv.innerHTML = '<p style="color: green;">手臂對稱性表現良好！</p>';
+
+                    // 更新運動力學數據 (關鍵指標分析區塊)
+                    currentFrameNumSpan.textContent = data.frame_num;
+                    stride_angle.textContent = data.metrics.stride_angle !== undefined ? data.metrics.stride_angle : '---';
+                    throwing_angle.textContent = data.metrics.throwing_angle !== undefined ? data.metrics.throwing_angle : '---';
+                    arm_symmetry.textContent = data.metrics.arm_symmetry !== undefined ? data.metrics.arm_symmetry : '---';
+                    hip_rotation.textContent = data.metrics.hip_rotation !== undefined ? data.metrics.hip_rotation : '---';
+                    elbow_height.textContent = data.metrics.elbow_height !== undefined ? data.metrics.elbow_height : '---';
+                    ankle_height.textContent = data.metrics.ankle_height !== undefined ? data.metrics.ankle_height : '---';
+                    shoulder_rotation.textContent = data.metrics.shoulder_rotation !== undefined ? data.metrics.shoulder_rotation : '---';
+                    torso_tilt_angle.textContent = data.metrics.torso_tilt_angle !== undefined ? data.metrics.torso_tilt_angle : '---';
+                    release_distance.textContent = data.metrics.release_distance !== undefined ? data.metrics.release_distance : '---';
+                    shoulder_to_hip.textContent = data.metrics.shoulder_to_hip !== undefined ? data.metrics.shoulder_to_hip : '---';
+
+                    // 根據數據生成和顯示建議 (姿勢改善建議區塊)
+                    // 這是一個非常簡化的範例，實際應基於更複雜的邏輯
+                    if (data.metrics.stride_angle !== undefined && data.metrics.stride_angle < 15) {
+                        suggestionsContentDiv.innerHTML = '<p style="color: orange;">建議：步幅角度小於15度。</p>';
+                    } else if (data.metrics.throwing_angle !== undefined && data.metrics.throwing_angle > 120) {
+                        suggestionsContentDiv.innerHTML = '<p style="color: orange;">建議：投擲角度大於120度。</p>';
+                    } else if (data.metrics.arm_symmetry !== undefined && data.metrics.arm_symmetry < 1) { // 這裡假設 1 是完美對稱
+                        suggestionsContentDiv.innerHTML = '<p style="color: green;">手臂對稱性表現良好！</p>';
+                    } else {
+                        suggestionsContentDiv.innerHTML = '<p>分析中...請等待數據</p>';
+                    }
+
+                    // 可以在此處將關鍵幀數據暫存，用於最終總結的建議
+
                 } else {
-                    suggestionsContentDiv.innerHTML = '<p>分析中...請等待數據</p>';
+                    // 處理未知數據類型 (這不太常見，但作為備用)
+                    console.warn("收到未知數據類型:", event.data);
                 }
-
-                // 可以在此處將關鍵幀數據暫存，用於最終總結的建議
-
             };
 
             websocket.onclose = () => {
