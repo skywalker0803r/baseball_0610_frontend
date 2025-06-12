@@ -98,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 繪製影片幀和骨架
                 const img = new Image();
-                img.src = 'data:image/jpeg;base64,' + btoa(data.frame_data);
+                img.src = 'data:image/jpeg;base64,' + data.frame_data;
                 img.onload = () => {
                     // 根據 canvas 尺寸調整圖片大小
                     const aspectRatio = img.width / img.height;
